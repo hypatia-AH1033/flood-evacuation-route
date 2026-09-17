@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>避難ルート コアロジック プロトタイプ</title>
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --panel: #ffffff;
+    --ink: #23241f;
+    --muted: #6b6b63;
+    --line: #ddd8cc;
+    --normal: #eef0e6;
+    --river: #2e5f8a;
+    --haz-08: #f0b429;
+    --haz-15: #d8442c;
+    --nodata: #c9c4b4;
+    --shelter: #2f7a4f;
+    --start: #23241f;
+    --route-safe: #2f7a4f;
+    --route-danger: #d8442c;
+    --route-reference: #b8860b;
+    --route-nodata: #8a8577;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 20px;
+  }
+  .app-shell { max-width: 1100px; margin: 0 auto; }
+  .crumbs { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .screen { display: none; }
+  .c-row { display: flex; flex-wrap: wrap; gap: 20px; }
+  .narrow { max-width: 480px; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; line-height: 1.6; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .left { width: 300px; flex-shrink: 0; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 8px; }
+  input[type="text"], select {
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 13px;
+    margin: 4px 0 6px;
+    font-family: inherit;
+  }
+  .muni-preview { font-size: 12.5px; color: var(--muted); margin: 4px 0 10px; }
+  .adjacent-list label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; margin: 4px 0; }
+  .adjacent-list input { margin: 0; width: auto; }
+  .site-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .site-row:last-child { border-bottom: none; }
+  .status-list .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .status-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .badge-AVAILABLE { background: var(--route-safe); }
+  .badge-NONE { background: var(--muted); }
+  .badge-GRAY { background: #9a958a; }
+  .badge-BLACK { background: var(--route-danger); }
+  .c-header { max-width: 100%; }
+  .c-footer { max-width: 100%; }
+  .explain { font-size: 12.5px; margin-bottom: 8px; }
+  .explain summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+  .explain p { color: var(--muted); line-height: 1.7; margin: 6px 0 0; }
+  .citation { font-size: 12.5px; color: var(--muted); margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .citation .cite-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .notice-box {
+    background: #fff8e6;
+    border: 1px solid var(--haz-08);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    font-size: 12.5px;
+  }
+  .notice-box p { margin: 4px 0; line-height: 1.7; color: var(--ink); }
+  .notice-box a { color: var(--ink); }
+  .map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+  .legend-hatch {
+    background:
+      repeating-linear-gradient(45deg, rgba(74,71,60,0.5) 0 2px, transparent 2px 6px),
+      var(--normal);
+  }
+  .legend-line {
+    display: inline-block;
+    width: 20px;
+    height: 0;
+    border-top: 3px dashed var(--route-nodata);
+    flex-shrink: 0;
+  }
+  .toolbar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .toolbar button {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toolbar button.active {
+    border-color: var(--ink);
+    background: #f0eee6;
+    font-weight: 600;
+  }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(0,0,0,.15); }
+  .actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .actions button {
+    padding: 9px 10px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-secondary { background: #eae7dc; color: var(--ink); }
+  .grid-wrap { line-height: 0; }
+  svg { display: block; }
+  .cell { stroke: #ffffff; stroke-width: 1px; cursor: pointer; }
+  .status {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .status .warn { color: var(--haz-15); font-weight: 600; }
+  .status .ok { color: var(--route-safe); font-weight: 600; }
+  legend { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="crumbs" id="crumbs"></div>
+
+  <!-- 画面A: 拠点登録（地理的な対象自治体の登録のみ。データ状態は扱わない） -->
+  <div id="screenA" class="screen">
+    <div class="panel narrow">
+      <h1>拠点登録</h1>
+      <p class="sub">住所は自由入力です。都道府県・市区町村を個別に選ぶ必要はありません（このプロトタイプでは自治体の自動判定はダミーです）。</p>
+      <label>拠点名</label>
+      <select id="siteLabelSelect">
+        <option value="居住地">居住地</option>
+        <option value="勤務地">勤務地</option>
+        <option value="custom">その他（自由入力）</option>
+      </select>
+      <input type="text" id="siteLabelCustom" placeholder="拠点名を入力" style="display:none;">
+      <div id="replacePicker" style="display:none; margin:4px 0 10px;">
+        <div class="sub" style="margin:0 0 4px;">この区分（居住地/勤務地/その他）は登録上限に達しています。置き換える拠点を選んでください。</div>
+        <select id="replaceTarget"></select>
+      </div>
+      <label>住所</label>
+      <input type="text" id="siteAddress" placeholder="例：千葉県市川市〇〇1-2-3">
+      <div id="municipalityPreview" class="muni-preview">住所を入力すると、所在市区町村がここに表示されます（ダミー判定）。</div>
+      <div class="sub" style="margin:10px 0 4px;">隣接市区町村（対象範囲に含める市区町村を選択。地理的な候補のみで、データの利用可否はここには表示しません）</div>
+      <div id="adjacentList" class="adjacent-list"></div>
+      <div class="actions" style="margin-top:14px;">
+        <button class="btn-primary" id="saveSiteBtn">この拠点を保存</button>
+        <button class="btn-secondary" id="siteToB">拠点選択に戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 画面B: 拠点選択（対象自治体の判定は行わず、拠点を選ぶだけ） -->
+  <div id="screenB" class="screen">
+    <div class="panel narrow">
+      <h1>拠点を選択</h1>
+      <p class="sub">避難ルートを確認する拠点を選んでください。</p>
+      <div id="siteList" class="site-list"></div>
+      <div class="actions" style="margin-top:14px;">
+        <button class="btn-secondary" id="addSiteBtn">＋ 新しい拠点を登録</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 画面D: 外水データ利用不可によるブロック（B→C間の共通遷移処理）。
+       外水は絶対除外条件の前提となるレイヤーのため、これが使えない自治体を含む場合のみ、
+       ここでシミュレーションを開始しない。内水の利用可否はここでは扱わない（Cで案内） -->
+  <div id="screenD" class="screen">
+    <div class="panel narrow">
+      <h1>この拠点ではシミュレーションを開始できません</h1>
+      <p class="sub">外水（河川）データが利用できない場合は、河川等の危険区域を適切に除外できないため、このシステムではシミュレーションを開始しません。</p>
+      <div id="dataStatusList" class="status-list"></div>
+      <div class="actions" style="margin-top:14px;">
+        <button class="btn-secondary" id="dataBackBtn">拠点選択に戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 画面C: ルート結果表示（既存のルーティングコアUIはそのまま。ヘッダー・常設説明・出典表示を追加） -->
+  <div id="screenC" class="screen">
+    <div class="panel c-header">
+      <button class="btn-secondary" id="cBackBtn" style="margin-bottom:10px;">← 拠点選択に戻る</button>
+      <h1 id="cSiteTitle">結果表示</h1>
+      <p class="sub" id="cMuniSub"></p>
+    </div>
+
+    <div class="c-row">
+      <div class="panel left">
+        <h1>避難ルート コアロジック プロトタイプ</h1>
+        <p class="sub">実データは未使用。グリッド上に危険エリア・避難所・起点を自由に配置して、迂回ルート探索ロジック（通常時／完全包囲時のフォールバック）を検証するためのツールです。</p>
+
+        <div class="toolbar" id="toolbar">
+          <button data-mode="normal" class="active"><span class="swatch" style="background:var(--normal)"></span>通常（消しゴム）</button>
+          <button data-mode="haz08"><span class="swatch" style="background:var(--haz-08)"></span>内水 0.8m（危険・迂回可）</button>
+          <button data-mode="haz15"><span class="swatch" style="background:var(--haz-15)"></span>内水 1.5m（危険・迂回可）</button>
+          <button data-mode="river"><span class="swatch" style="background:var(--river)"></span>外水／河川沿い（絶対除外）</button>
+          <button data-mode="shelter"><span class="swatch" style="background:var(--shelter)"></span>避難所</button>
+          <button data-mode="start"><span class="swatch" style="background:var(--start)"></span>起点（住所）</button>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="calcBtn">ルート計算</button>
+          <button class="btn-secondary" id="scenarioNormal">シナリオ読込：通常迂回</button>
+          <button class="btn-secondary" id="scenarioShallowShortcut">シナリオ読込：内水の近道</button>
+          <button class="btn-secondary" id="scenarioSurround">シナリオ読込：完全包囲</button>
+          <button class="btn-secondary" id="clearBtn">グリッドを全消去</button>
+        </div>
+
+        <div class="status" id="status">起点と避難所（複数可）を配置し、危険エリアを描いてから「ルート計算」を押してください。</div>
+        <div class="candidates" id="candidates"></div>
+      </div>
+
+      <div class="panel grid-wrap">
+        <svg id="grid"></svg>
+        <div class="map-legend">
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--normal)"></span>通行可能</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--haz-08)"></span>内水0.8m（危険・迂回可）</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--haz-15)"></span>内水1.5m（危険・迂回可）</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:var(--river)"></span>外水／河川（絶対除外）</div>
+          <div class="legend-item"><span class="legend-swatch legend-hatch"></span>内水データなし（危険区域ではなく、安全とは判定していません）</div>
+          <div class="legend-item"><span class="legend-line"></span>参考：浸水データが無いエリアを含むルート</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel c-footer">
+      <details class="explain">
+        <summary>所要時間について（表示中の全ルート共通の注意事項）</summary>
+        <p>表示している所要時間はあくまで参考値です。実際にはより時間がかかる可能性があります（浸水が0.5m未満の区間でも、歩行速度は低下します）。</p>
+      </details>
+      <details class="explain">
+        <summary>0.5mという基準について</summary>
+        <p>このツールは、浸水深がおおむね0.5m以上と想定される区域を「危険エリア」として地図上に表示し、回避の対象としています。0.5mという数値は、徒歩避難が困難になり始める目安として設計上採用したものであり、0.5m未満であれば安全であることを意味するものではありません。実際の危険度は水の流れ・地形・避難のタイミングなど多くの要因に左右されるため、あくまで事前検討の材料としてご利用ください。</p>
+      </details>
+      <div class="notice-box" id="unavailableNotice" style="display:none;"></div>
+      <div class="citation" id="citationBox"></div>
+      <div class="actions" style="margin-top:10px;">
+        <button class="btn-secondary" id="printBtn">印刷</button>
+        <button class="btn-secondary" id="saveImgBtn">画像として保存（モック）</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .candidates { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .candidates button {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .candidates button.selected {
+    border-color: var(--ink);
+    background: #f0eee6;
+    font-weight: 600;
+  }
+  .candidates .hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+</style>
+
+<script>
+// ============================================================
+// 画面遷移モック（A拠点登録 → B拠点選択 → D自治体データ状態確認 → C結果表示）
+// ここはUI/画面遷移のみのダミー実装。自治体データの実取得・更新、
+// 住所からの自治体自動判定は行わない。ルーティングコア（下部）は無改修。
+// ============================================================
+
+// ダミーの自治体データ状態DB（本来は自治体追加作業で管理する一覧に相当）。
+// 外水(gai)と内水(nai)は別レイヤーとして独立に状態を持つ。
+// 習志野市の外水NONEは実データを示すものではなく、
+// D（外水データ不足によるシミュレーション停止）の動作確認用ダミー
+const DUMMY_MUNICIPALITY_DB = {
+  '市川市':   { gai: 'AVAILABLE', nai: 'AVAILABLE', officialUrl: 'https://www.city.ichikawa.lg.jp/' },
+  '浦安市':   { gai: 'AVAILABLE', nai: 'AVAILABLE', officialUrl: 'https://www.city.urayasu.lg.jp/' },
+  '松戸市':   { gai: 'AVAILABLE', nai: 'GRAY',      officialUrl: 'https://www.city.matsudo.chiba.jp/' },
+  '船橋市':   { gai: 'AVAILABLE', nai: 'BLACK',     officialUrl: 'https://www.city.funabashi.lg.jp/' },
+  '習志野市': { gai: 'NONE',      nai: 'NONE',      officialUrl: 'https://www.city.narashino.lg.jp/' },
+};
+const STATUS_LABEL = { AVAILABLE: 'データあり', NONE: 'データ無し', GRAY: '確認未了', BLACK: '利用不可' };
+const NAI_REASON_PHRASE = {
+  NONE:  'データが存在しないため、本システムでは参照していません。',
+  GRAY:  '利用条件の確認が完了していないため、本システムでは参照していません。',
+  BLACK: '利用許諾の関係で、本システムから直接参照できません。',
+};
+
+let sites = [];       // { id, category, label, address, municipalityName, adjacentMunicipalities: [] }
+let currentSite = null;
+let editingSiteId = null; // 編集中の拠点id。null なら新規登録モード
+
+// 拠点データのローカル保存(A-6)。既存のB/C/Dのロジック・遷移条件には影響しない、Aの保存処理のみの追加。
+const SITES_STORAGE_KEY = 'flood_route_sites_v1';
+function loadSitesFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(SITES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) sites = parsed;
+    }
+  } catch (e) { /* localStorageが使えない環境(プライベートブラウジング等)では無視し、セッション内メモリのみで動作させる */ }
+}
+function saveSitesToStorage() {
+  try {
+    window.localStorage.setItem(SITES_STORAGE_KEY, JSON.stringify(sites));
+  } catch (e) { /* 保存に失敗しても致命的ではないため無視 */ }
+}
+loadSitesFromStorage();
+
+// 拠点の登録上限：居住地1、勤務地2、その他(自由入力)2まで。上限到達時は同一区分内の置換で対応する。
+const SITE_CATEGORY_LIMIT = { '居住地': 1, '勤務地': 2, 'custom': 2 };
+function siteCategory(labelSel) { return labelSel === 'custom' ? 'custom' : labelSel; }
+function countInCategory(category, excludeId) {
+  return sites.filter(s => s.category === category && s.id !== excludeId).length;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// 住所からの自治体自動判定（ダミー）：登録済み自治体名が住所文字列に含まれていれば採用、
+// 見つからなければ先頭の自治体をダミーの既定値として使う。
+function guessMunicipality(address) {
+  const known = Object.keys(DUMMY_MUNICIPALITY_DB);
+  const hit = known.find(name => address.includes(name));
+  return hit || known[0];
+}
+
+function showScreen(name) {
+  ['A', 'B', 'D', 'C'].forEach(n => {
+    document.getElementById('screen' + n).style.display = (n === name) ? 'block' : 'none';
+  });
+  const labels = { A: '拠点登録', B: '拠点選択', D: 'データ状況の確認', C: '結果表示' };
+  document.getElementById('crumbs').textContent = labels[name];
+}
+
+// --- 画面A: 拠点登録 ---
+function refreshCategoryUI() {
+  const labelSel = document.getElementById('siteLabelSelect').value;
+  const category = siteCategory(labelSel);
+  const atLimit = countInCategory(category, editingSiteId) >= SITE_CATEGORY_LIMIT[category];
+  const picker = document.getElementById('replacePicker');
+  if (atLimit) {
+    picker.style.display = 'block';
+    const sel = document.getElementById('replaceTarget');
+    sel.innerHTML = '<option value="">-- 置き換える拠点を選択 --</option>' +
+      sites.filter(s => s.category === category && s.id !== editingSiteId)
+        .map(s => `<option value="${s.id}">${escapeHtml(s.label)}（${escapeHtml(s.address)}）</option>`)
+        .join('');
+  } else {
+    picker.style.display = 'none';
+  }
+}
+
+function goToSiteForm() {
+  editingSiteId = null; // 新規登録モード
+  showScreen('A');
+  refreshCategoryUI();
+}
+
+document.getElementById('siteLabelSelect').addEventListener('change', e => {
+  document.getElementById('siteLabelCustom').style.display = e.target.value === 'custom' ? 'block' : 'none';
+  refreshCategoryUI();
+});
+
+function renderAdjacentPicker(homeMunicipality) {
+  const el = document.getElementById('adjacentList');
+  el.innerHTML = '';
+  Object.keys(DUMMY_MUNICIPALITY_DB)
+    .filter(name => name !== homeMunicipality)
+    .forEach(name => {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = name;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(name));
+      el.appendChild(label);
+    });
+}
+
+document.getElementById('siteAddress').addEventListener('input', e => {
+  const addr = e.target.value.trim();
+  const preview = document.getElementById('municipalityPreview');
+  if (!addr) {
+    preview.textContent = '住所を入力すると、所在市区町村がここに表示されます（ダミー判定）。';
+    renderAdjacentPicker(null);
+    return;
+  }
+  const muni = guessMunicipality(addr);
+  preview.textContent = `所在市区町村（自動判定・ダミー）：${muni}`;
+  renderAdjacentPicker(muni);
+});
+renderAdjacentPicker(null);
+
+function resetSiteForm() {
+  editingSiteId = null;
+  document.getElementById('siteAddress').value = '';
+  document.getElementById('siteLabelCustom').value = '';
+  document.getElementById('siteLabelCustom').style.display = 'none';
+  document.getElementById('siteLabelSelect').value = '居住地';
+  document.getElementById('municipalityPreview').textContent = '住所を入力すると、所在市区町村がここに表示されます（ダミー判定）。';
+  renderAdjacentPicker(null);
+  refreshCategoryUI();
+}
+
+document.getElementById('saveSiteBtn').addEventListener('click', () => {
+  const addr = document.getElementById('siteAddress').value.trim();
+  if (!addr) { alert('住所を入力してください。'); return; }
+  const labelSel = document.getElementById('siteLabelSelect').value;
+  const category = siteCategory(labelSel);
+  const label = labelSel === 'custom' ? (document.getElementById('siteLabelCustom').value.trim() || '拠点') : labelSel;
+  const muni = guessMunicipality(addr);
+  const adjacent = Array.from(document.querySelectorAll('#adjacentList input:checked')).map(cb => cb.value);
+
+  const atLimit = countInCategory(category, editingSiteId) >= SITE_CATEGORY_LIMIT[category];
+
+  if (editingSiteId) {
+    // 編集モード：上限判定は編集対象の拠点自身を除いて行う
+    if (atLimit) {
+      const replaceId = document.getElementById('replaceTarget').value;
+      if (!replaceId) { alert('この区分は上限に達しています。置き換える拠点を選択してください。'); return; }
+      const editedId = editingSiteId;
+      sites = sites.filter(s => s.id !== editedId); // 編集元は一旦除去
+      const idx = sites.findIndex(s => s.id === replaceId);
+      const newSite = { id: replaceId, category, label, address: addr, municipalityName: muni, adjacentMunicipalities: adjacent };
+      if (idx >= 0) sites[idx] = newSite;
+      if (currentSite && (currentSite.id === editedId || currentSite.id === replaceId)) currentSite = null;
+    } else {
+      const idx = sites.findIndex(s => s.id === editingSiteId);
+      if (idx >= 0) {
+        sites[idx] = { id: editingSiteId, category, label, address: addr, municipalityName: muni, adjacentMunicipalities: adjacent };
+        if (currentSite && currentSite.id === editingSiteId) currentSite = null;
+      }
+    }
+    saveSitesToStorage();
+    resetSiteForm();
+    goToSiteList(); // 編集後は一覧に戻る(新規登録と違い、選択画面の自動遷移はしない)
+    return;
+  }
+
+  if (atLimit) {
+    const replaceId = document.getElementById('replaceTarget').value;
+    if (!replaceId) { alert('この区分は上限に達しています。置き換える拠点を選択してください。'); return; }
+    const idx = sites.findIndex(s => s.id === replaceId);
+    const newSite = { id: sites[idx].id, category, label, address: addr, municipalityName: muni, adjacentMunicipalities: adjacent };
+    sites[idx] = newSite;
+    // 置き換えた拠点が現在参照中の拠点だった場合、古い状態(対象自治体集合など)を残さない
+    if (currentSite && currentSite.id === newSite.id) currentSite = null;
+  } else {
+    sites.push({ id: 'site_' + Date.now(), category, label, address: addr, municipalityName: muni, adjacentMunicipalities: adjacent });
+  }
+
+  saveSitesToStorage();
+  resetSiteForm();
+  enterB();
+});
+document.getElementById('siteToB').addEventListener('click', goToSiteList);
+
+// 既存拠点の編集(A-9)：フォームに内容を読み込み、編集モードでA画面を開く。
+// 保存は上のsaveSiteBtnハンドラのeditingSiteId分岐が扱う。B/C/Dの遷移条件・ロジックには影響しない。
+function editSite(id) {
+  const s = sites.find(x => x.id === id);
+  if (!s) return;
+  editingSiteId = id;
+  document.getElementById('siteLabelSelect').value = (s.category === 'custom') ? 'custom' : s.category;
+  document.getElementById('siteLabelCustom').style.display = (s.category === 'custom') ? 'block' : 'none';
+  document.getElementById('siteLabelCustom').value = (s.category === 'custom') ? s.label : '';
+  document.getElementById('siteAddress').value = s.address;
+  document.getElementById('municipalityPreview').textContent = `所在市区町村（自動判定・ダミー）：${s.municipalityName}`;
+  renderAdjacentPicker(s.municipalityName);
+  s.adjacentMunicipalities.forEach(name => {
+    const cb = Array.from(document.querySelectorAll('#adjacentList input')).find(c => c.value === name);
+    if (cb) cb.checked = true;
+  });
+  showScreen('A');
+  refreshCategoryUI();
+}
+
+// --- 画面B: 拠点選択 ---
+function renderSiteList() {
+  const el = document.getElementById('siteList');
+  el.innerHTML = '';
+  if (sites.length === 0) {
+    el.innerHTML = '<p class="sub">登録済みの拠点がありません。まず拠点を登録してください。</p>';
+    return;
+  }
+  sites.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'site-row';
+    row.innerHTML = `<div><strong>${escapeHtml(s.label)}</strong><div class="sub">${escapeHtml(s.address)}（${escapeHtml(s.municipalityName)}）</div></div>`;
+    const btnWrap = document.createElement('div');
+    btnWrap.style.display = 'flex';
+    btnWrap.style.gap = '6px';
+    const selectBtn = document.createElement('button');
+    selectBtn.className = 'btn-secondary';
+    selectBtn.textContent = '選択';
+    selectBtn.addEventListener('click', () => selectSite(s.id));
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-secondary';
+    editBtn.textContent = '編集';
+    editBtn.addEventListener('click', () => editSite(s.id));
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-secondary';
+    delBtn.textContent = '削除';
+    delBtn.addEventListener('click', () => deleteSite(s.id));
+    btnWrap.appendChild(selectBtn);
+    btnWrap.appendChild(editBtn);
+    btnWrap.appendChild(delBtn);
+    row.appendChild(btnWrap);
+    el.appendChild(row);
+  });
+}
+
+function deleteSite(id) {
+  if (!window.confirm('この拠点を削除しますか？')) return;
+  sites = sites.filter(s => s.id !== id);
+  // 削除した拠点が現在参照中の拠点だった場合、古い状態(対象自治体集合など)を残さない
+  if (currentSite && currentSite.id === id) currentSite = null;
+  saveSitesToStorage();
+  renderSiteList();
+}
+
+function goToSiteList() {
+  showScreen('B');
+  renderSiteList();
+}
+
+// 0件→A誘導／1件→選択省略／2件以上→一覧選択
+function enterB() {
+  if (sites.length === 0) { goToSiteForm(); return; }
+  if (sites.length === 1) { selectSite(sites[0].id); return; }
+  goToSiteList();
+}
+document.getElementById('addSiteBtn').addEventListener('click', goToSiteForm);
+
+// --- 画面D: 外水データ利用不可によるブロック（外水のみがゲート条件。内水はここでは判定しない） ---
+// 新しい拠点(前回と異なるid)を選択した場合のみ、前回のシミュレーション結果(グリッド・ルート・候補)をクリアする。
+// 同一拠点の再選択や、画面C→Bなどの「戻る」操作だけでは描画状態を保持する。
+function resetSimulationState() {
+  cells = Array.from({length: N}, () => Array.from({length: N}, () => ({type: 'normal'})));
+  lastRoute = null;
+  candidates = [];
+}
+
+function selectSite(id) {
+  const isNewSite = !currentSite || currentSite.id !== id;
+  currentSite = sites.find(s => s.id === id);
+  const targetNames = [currentSite.municipalityName, ...currentSite.adjacentMunicipalities];
+  const targets = targetNames.map(name => ({ name, ...(DUMMY_MUNICIPALITY_DB[name] || { gai: 'NONE', nai: 'NONE' }) }));
+  currentSite.targets = targets;
+
+  if (isNewSite) resetSimulationState();
+
+  const blocked = targets.filter(t => t.gai !== 'AVAILABLE');
+  if (blocked.length > 0) {
+    renderBlockedByGai(blocked);
+    showScreen('D');
+  } else {
+    enterC(); // 外水は全てAVAILABLE→内水の状態に関わらずワンクッション無しでC直行
+  }
+}
+
+function renderBlockedByGai(blocked) {
+  const el = document.getElementById('dataStatusList');
+  el.innerHTML = '';
+  blocked.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'status-row';
+    row.innerHTML = `<span>${escapeHtml(t.name)}（外水）</span><span class="status-badge badge-${t.gai}">${STATUS_LABEL[t.gai]}</span>`;
+    el.appendChild(row);
+    if (t.officialUrl) {
+      const linkRow = document.createElement('div');
+      linkRow.className = 'sub';
+      linkRow.style.margin = '0 0 8px';
+      linkRow.innerHTML = `<a href="${t.officialUrl}" target="_blank" rel="noopener">${escapeHtml(t.name)}の公式サイトへ</a>`;
+      el.appendChild(linkRow);
+    }
+  });
+}
+document.getElementById('dataBackBtn').addEventListener('click', goToSiteList);
+
+// --- 画面C: ルート結果表示 ---
+// 出典表示＝実際に使用したデータの明示。使えなかったデータの案内とは別枠で扱う。
+function renderCitation(targets) {
+  const el = document.getElementById('citationBox');
+  const describe = t => t.nai === 'AVAILABLE'
+    ? `${t.name} 外水（国交省）・内水 公開ハザードマップ`
+    : `${t.name} 外水（国交省）`;
+  if (targets.length <= 1) {
+    el.textContent = `使用データ：${describe(targets[0])}`;
+    return;
+  }
+  const rows = targets.map(t =>
+    `<div class="cite-row"><span>${escapeHtml(t.name)}</span><span>${t.nai === 'AVAILABLE' ? '外水・内水' : '外水のみ'}</span></div>`
+  ).join('');
+  el.innerHTML = `<details><summary>使用データ：${targets.length}自治体分（詳細を表示）</summary>${rows}</details>`;
+}
+
+// 未参照データの案内＝使えなかった内水データについての案内。出典表示とは混ぜない。
+function renderUnavailableNotice(targets) {
+  const el = document.getElementById('unavailableNotice');
+  const unavailable = targets.filter(t => t.nai !== 'AVAILABLE');
+  if (unavailable.length === 0) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = 'block';
+  const body = unavailable.map(t => {
+    const link = t.officialUrl ? ` <a href="${t.officialUrl}" target="_blank" rel="noopener">${escapeHtml(t.name)}公式サイトへ</a>` : '';
+    return `<p>${escapeHtml(t.name)}の内水ハザードマップは、${NAI_REASON_PHRASE[t.nai]}内水に関する情報は${escapeHtml(t.name)}の公式ハザードマップをご確認ください。${link}</p>`;
+  }).join('');
+  el.innerHTML = `<div class="sub" style="font-weight:600; color:var(--ink); margin-bottom:2px;">内水浸水データについて</div>${body}`;
+}
+
+function enterC() {
+  document.getElementById('cSiteTitle').textContent = `結果表示：${currentSite.label}`;
+  document.getElementById('cMuniSub').textContent = `起点住所：${currentSite.address}（${currentSite.municipalityName}）`;
+  renderCitation(currentSite.targets);
+  renderUnavailableNotice(currentSite.targets);
+  showScreen('C');
+  render();          // 新規拠点選択時のリセット(またはブラウザバック等での状態保持)を画面に反映する
+  renderCandidates();
+}
+document.getElementById('cBackBtn').addEventListener('click', goToSiteList);
+
+document.getElementById('printBtn').addEventListener('click', () => window.print());
+document.getElementById('saveImgBtn').addEventListener('click', () => {
+  alert('（モック）画像保存は本プロトタイプでは未実装です。');
+});
+
+// ============================================================
+// ここから下：ルーティングコアロジック（前回までに確定。無改修）
+// ============================================================
+const N = 16;           // グリッドの一辺
+const CELL = 32;        // 1マスのピクセルサイズ
+
+// --- 状態 ---
+// type: 'normal' | 'haz08' | 'haz15' | 'river' | 'shelter' | 'start'
+let cells = Array.from({length: N}, () => Array.from({length: N}, () => ({type: 'normal'})));
+let currentMode = 'normal';
+
+// --- 内水(nai)レイヤーの領域判定 ---
+// 内水データが利用不可(nai!==AVAILABLE)な領域は「浸水なし」ではなく「データが無く判定不能」として扱う。
+// モック上、実際の地理境界は持たないため、拠点所在地(左半分)／最初の隣接自治体(右半分)の
+// 簡易な二分割で領域を割り当てる(実データ上の自治体境界設計への拡張はしない)。
+function naiRegionStatus() {
+  if (!currentSite || !currentSite.targets) return null;
+  const home = currentSite.targets.find(t => t.name === currentSite.municipalityName);
+  const others = currentSite.targets.filter(t => t.name !== currentSite.municipalityName);
+  const adjacent = others[0] || home;
+  return { home, adjacent };
+}
+
+function regionOf(c, region) {
+  return c < N / 2 ? region.home : region.adjacent;
+}
+
+// (1) 地図表示用：非AVAILABLE領域かどうかの判定のみ行う。
+//     セルの元の色(normal/haz08/haz15)はそのまま維持し、render()側で半透明の斜線を重ねて示す
+//     （「危険」でも「安全」でもない「データが無く判定不能」であることを、色の書き換えではなく
+//     オーバーレイで表現する）。river/shelter/startは対象外(従来通りの表示)。
+function isNoDataRegionCell(type, c, region) {
+  if (!region) return false;
+  if (type !== 'normal' && type !== 'haz08' && type !== 'haz15') return false;
+  const target = regionOf(c, region);
+  return !(target && target.nai === 'AVAILABLE');
+}
+
+// (2) 既存の安全候補／参考経路(浅い内水)／フォールバック探索用：
+//     データが無い領域は地形の種類を問わず(normal/haz08/haz15のいずれも)未知領域として扱い、
+//     これら既存ロジックに一切触れさせないため'river'(絶対除外)として扱う。
+//     river(外水)・shelter・startはそのまま(river はもともと除外、shelter/startは地点情報のため変換しない)。
+//     AVAILABLE領域の判定・既存ロジックはこれまで通り変更しない。
+function buildBlockedSearchCells(raw) {
+  const region = naiRegionStatus();
+  if (!region) return raw;
+  return raw.map(row => row.map((cell, c) => {
+    if (cell.type === 'river' || cell.type === 'shelter' || cell.type === 'start') return cell;
+    const target = regionOf(c, region);
+    return (target && target.nai === 'AVAILABLE') ? cell : { type: 'river' };
+  }));
+}
+
+// (3) 新設「浸水データが無いエリアを含む参考経路」探索用：
+//     データが無い領域は地形の種類を問わず'nodata'(通行可)として扱う。
+//     AVAILABLE領域の内水(haz08/haz15)・riverは除外する。shelter/startは地点情報のため変換しない。
+//     安全候補・既存の参考経路・フォールバックとは完全に別入力・別探索。
+function buildNoDataSearchCells(raw) {
+  const region = naiRegionStatus();
+  if (!region) {
+    return raw.map(row => row.map(cell =>
+      (cell.type === 'haz08' || cell.type === 'haz15') ? { type: 'river' } : cell
+    ));
+  }
+  return raw.map(row => row.map((cell, c) => {
+    if (cell.type === 'river' || cell.type === 'shelter' || cell.type === 'start') return cell;
+    const target = regionOf(c, region);
+    if (target && target.nai === 'AVAILABLE') {
+      // AVAILABLE領域：内水(haz08/haz15)はこの探索では除外、normalはそのまま通行可
+      return (cell.type === 'haz08' || cell.type === 'haz15') ? { type: 'river' } : cell;
+    }
+    return { type: 'nodata' }; // データが無い領域：地形を問わず通行可('nodata'扱い)
+  }));
+}
+
+const svg = document.getElementById('grid');
+svg.setAttribute('width', N * CELL);
+svg.setAttribute('height', N * CELL);
+
+const colorFor = t => ({
+  normal: 'var(--normal)',
+  haz08: 'var(--haz-08)',
+  haz15: 'var(--haz-15)',
+  river: 'var(--river)',
+  nodata: 'var(--nodata)',
+  shelter: 'var(--shelter)',
+  start: 'var(--start)',
+}[t]);
+
+function render() {
+  svg.innerHTML = '';
+
+  // nodata領域用の斜線パターン定義（面の色は元のセル種別の色のまま維持し、これを重ねて描画する）
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `
+    <pattern id="nodata-hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#4a473c" stroke-width="1.6" stroke-opacity="0.45" />
+    </pattern>
+  `;
+  svg.appendChild(defs);
+
+  const region = naiRegionStatus();
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const type = cells[r][c].type;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', c * CELL);
+      rect.setAttribute('y', r * CELL);
+      rect.setAttribute('width', CELL);
+      rect.setAttribute('height', CELL);
+      rect.setAttribute('class', 'cell');
+      rect.setAttribute('fill', colorFor(type));
+      rect.dataset.r = r;
+      rect.dataset.c = c;
+      rect.addEventListener('click', onCellClick);
+      svg.appendChild(rect);
+
+      if (isNoDataRegionCell(type, c, region)) {
+        const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        overlay.setAttribute('x', c * CELL);
+        overlay.setAttribute('y', r * CELL);
+        overlay.setAttribute('width', CELL);
+        overlay.setAttribute('height', CELL);
+        overlay.setAttribute('fill', 'url(#nodata-hatch)');
+        overlay.setAttribute('pointer-events', 'none'); // クリック判定は下のセルrectのまま(編集動作は変えない)
+        svg.appendChild(overlay);
+      }
+    }
+  }
+  if (lastRoute) drawRoute(lastRoute);
+}
+
+function onCellClick(e) {
+  const r = +e.target.dataset.r, c = +e.target.dataset.c;
+  if (currentMode === 'start') {
+    // 起点は1つだけ
+    for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++)
+      if (cells[rr][cc].type === 'start') cells[rr][cc] = {type: 'normal'};
+  }
+  cells[r][c] = {type: currentMode};
+  lastRoute = null;
+  candidates = [];
+  render();
+  renderCandidates();
+}
+
+document.getElementById('toolbar').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-mode]');
+  if (!btn) return;
+  currentMode = btn.dataset.mode;
+  document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  cells = Array.from({length: N}, () => Array.from({length: N}, () => ({type: 'normal'})));
+  lastRoute = null;
+  candidates = [];
+  setStatus('グリッドを消去しました。');
+  renderCandidates();
+  render();
+});
+
+// --- シナリオ ---
+function loadScenario(fn) {
+  cells = Array.from({length: N}, () => Array.from({length: N}, () => ({type: 'normal'})));
+  fn();
+  lastRoute = null;
+  candidates = [];
+  render();
+  renderCandidates();
+}
+
+document.getElementById('scenarioNormal').addEventListener('click', () => {
+  loadScenario(() => {
+    cells[8][2] = {type: 'start'};
+    cells[2][13] = {type: 'shelter'};
+    cells[13][13] = {type: 'shelter'};
+    // 内水の帯（迂回すれば通れる）
+    for (let r = 4; r <= 11; r++) { cells[r][7] = {type: 'haz08'}; cells[r][8] = {type: 'haz15'}; }
+    // 河川（絶対除外）
+    for (let c = 0; c < N; c++) cells[0][c] = {type: 'river'};
+  });
+  setStatus('「通常迂回」シナリオを読み込みました。危険エリアを迂回した経路が見つかるはずです。参考経路の到着避難所は安全候補と重複するため、非表示になるはずです。');
+});
+
+document.getElementById('scenarioShallowShortcut').addEventListener('click', () => {
+  loadScenario(() => {
+    cells[8][2] = {type: 'start'};
+    cells[2][13] = {type: 'shelter'};   // 避難所A：安全ルートで届く
+    cells[8][13] = {type: 'shelter'};   // 避難所B：浅い内水のリングで囲まれ、安全ルートでは届かない
+    cells[7][13] = {type: 'haz08'};
+    cells[9][13] = {type: 'haz08'};
+    cells[8][12] = {type: 'haz08'};
+    cells[8][14] = {type: 'haz08'};
+  });
+  setStatus('「内水の近道」シナリオを読み込みました。避難所Bは浅い内水(0.8m)のリングで囲まれ、安全候補には現れません。参考経路として避難所Bへのルートが表示されるはずです。');
+});
+
+document.getElementById('scenarioSurround').addEventListener('click', () => {
+  loadScenario(() => {
+    cells[8][8] = {type: 'start'};
+    cells[1][1] = {type: 'shelter'};
+    cells[14][14] = {type: 'shelter'};
+    // 起点を内水(深さ違い)でリング状に完全包囲
+    for (let r = 5; r <= 11; r++) {
+      for (let c = 5; c <= 11; c++) {
+        const isRing = r === 5 || r === 11 || c === 5 || c === 11;
+        if (isRing) {
+          // リングの一部を深め(1.5m)、一部を浅め(0.8m)にしておく
+          cells[r][c] = {type: (c === 8) ? 'haz15' : 'haz08'};
+        }
+      }
+    }
+    // リングのすぐ外側、南側だけ河川(絶対除外)にして「浅い側を通らせる」誘導を作る
+    for (let c = 4; c <= 12; c++) cells[12][c] = {type: 'river'};
+  });
+  setStatus('「完全包囲」シナリオを読み込みました。通常探索では避難所に届かないはずです。ルート計算でフォールバック挙動を確認してください。');
+});
+
+// --- ルート探索 ---
+let lastRoute = null;
+let candidates = [];   // [{label, path, danger, meta}]
+let selectedIndex = 0;
+
+function neighbors(r, c) {
+  const out = [];
+  const deltas = [[-1,0],[1,0],[0,-1],[0,1]];
+  for (const [dr, dc] of deltas) {
+    const nr = r + dr, nc = c + dc;
+    if (nr >= 0 && nr < N && nc >= 0 && nc < N) out.push([nr, nc]);
+  }
+  return out;
+}
+
+function depthOf(type) {
+  if (type === 'haz08') return 0.8;
+  if (type === 'haz15') return 1.5;
+  return 0;
+}
+
+// 通常時：river・haz08・haz15 は通行不可（uniform cost dijkstra = 実質BFS）
+function findSafeRoute(start, shelters) {
+  const dist = Array.from({length: N}, () => Array(N).fill(Infinity));
+  const prev = Array.from({length: N}, () => Array(N).fill(null));
+  dist[start[0]][start[1]] = 0;
+  const queue = [start];
+  while (queue.length) {
+    queue.sort((a, b) => dist[a[0]][a[1]] - dist[b[0]][b[1]]);
+    const [r, c] = queue.shift();
+    for (const [nr, nc] of neighbors(r, c)) {
+      const t = cells[nr][nc].type;
+      if (t === 'river' || t === 'haz08' || t === 'haz15') continue; // 危険エリアは通行不可
+      const nd = dist[r][c] + 1;
+      if (nd < dist[nr][nc]) {
+        dist[nr][nc] = nd;
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
+    }
+  }
+  const results = shelters
+    .map(s => ({ s, d: dist[s[0]][s[1]] }))
+    .filter(x => x.d < Infinity)
+    .sort((a, b) => a.d - b.d);
+  return { results, prev };
+}
+
+// 参考経路：river・haz15（深い内水）は除外、haz08（浅い内水=1m未満相当）のみ通行可。
+// 安全候補生成とは入力を共有しない独立した探索。
+function findReferenceRoute(start, shelters) {
+  const dist = Array.from({length: N}, () => Array(N).fill(Infinity));
+  const prev = Array.from({length: N}, () => Array(N).fill(null));
+  dist[start[0]][start[1]] = 0;
+  const queue = [start];
+  while (queue.length) {
+    queue.sort((a, b) => dist[a[0]][a[1]] - dist[b[0]][b[1]]);
+    const [r, c] = queue.shift();
+    for (const [nr, nc] of neighbors(r, c)) {
+      const t = cells[nr][nc].type;
+      if (t === 'river' || t === 'haz15') continue; // 河川・深い内水は除外
+      const nd = dist[r][c] + 1;
+      if (nd < dist[nr][nc]) {
+        dist[nr][nc] = nd;
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
+    }
+  }
+  const results = shelters
+    .map(s => ({ s, d: dist[s[0]][s[1]] }))
+    .filter(x => x.d < Infinity)
+    .sort((a, b) => a.d - b.d);
+  return { results, prev };
+}
+
+// 「浸水データが無いエリアを含む参考経路」：'nodata'(データが無い領域の内水)のみ通行可とし、
+// river・AVAILABLE領域の内水(haz08/haz15)は除外する。安全候補・既存の参考経路・フォールバックとは
+// 完全に独立した探索(buildNoDataSearchCellsで作った専用の入力を使う)。
+function findNoDataRoute(start, shelters) {
+  const dist = Array.from({length: N}, () => Array(N).fill(Infinity));
+  const prev = Array.from({length: N}, () => Array(N).fill(null));
+  dist[start[0]][start[1]] = 0;
+  const queue = [start];
+  while (queue.length) {
+    queue.sort((a, b) => dist[a[0]][a[1]] - dist[b[0]][b[1]]);
+    const [r, c] = queue.shift();
+    for (const [nr, nc] of neighbors(r, c)) {
+      const t = cells[nr][nc].type;
+      if (t === 'river' || t === 'haz08' || t === 'haz15') continue; // riverとAVAILABLE領域の内水は除外
+      const nd = dist[r][c] + 1;
+      if (nd < dist[nr][nc]) {
+        dist[nr][nc] = nd;
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
+    }
+  }
+  const results = shelters
+    .map(s => ({ s, d: dist[s[0]][s[1]] }))
+    .filter(x => x.d < Infinity)
+    .sort((a, b) => a.d - b.d);
+  return { results, prev };
+}
+
+// フォールバック：river は絶対除外。haz08/haz15は通行可、コストは「経路上の最大深度」を優先最小化(タイブレークで距離)
+function findFallbackRoute(start, shelters) {
+  const key = (r, c) => r * N + c;
+  const dist = new Map(); // key -> [maxDepth, length]
+  const prev = Array.from({length: N}, () => Array(N).fill(null));
+  const startKey = key(start[0], start[1]);
+  dist.set(startKey, [0, 0]);
+  const visited = new Set();
+  const queue = [start];
+
+  function better(a, b) {
+    // a, b = [maxDepth, length] ; a が b より優れていれば true
+    if (a[0] !== b[0]) return a[0] < b[0];
+    return a[1] < b[1];
+  }
+
+  while (queue.length) {
+    queue.sort((p, q) => {
+      const dp = dist.get(key(p[0], p[1])) || [Infinity, Infinity];
+      const dq = dist.get(key(q[0], q[1])) || [Infinity, Infinity];
+      return dp[0] - dq[0] || dp[1] - dq[1];
+    });
+    const [r, c] = queue.shift();
+    const k = key(r, c);
+    if (visited.has(k)) continue;
+    visited.add(k);
+    const cur = dist.get(k);
+    for (const [nr, nc] of neighbors(r, c)) {
+      const t = cells[nr][nc].type;
+      if (t === 'river') continue; // 河川沿いは絶対除外
+      const d = depthOf(t);
+      const cand = [Math.max(cur[0], d), cur[1] + 1];
+      const nk = key(nr, nc);
+      const existing = dist.get(nk);
+      if (!existing || better(cand, existing)) {
+        dist.set(nk, cand);
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
+    }
+  }
+  const results = shelters
+    .map(s => ({ s, d: dist.get(key(s[0], s[1])) }))
+    .filter(x => x.d)
+    .sort((a, b) => a.d[0] - b.d[0] || a.d[1] - b.d[1]);
+  return { results, prev };
+}
+
+function depthRangeOfPath(path) {
+  const depths = path.map(([r, c]) => depthOf(cells[r][c].type)).filter(d => d > 0);
+  if (depths.length === 0) return null;
+  return { min: Math.min(...depths), max: Math.max(...depths) };
+}
+
+function reconstructPath(prev, target) {
+  const path = [];
+  let cur = target;
+  while (cur) {
+    path.push(cur);
+    cur = prev[cur[0]][cur[1]];
+  }
+  return path.reverse();
+}
+
+function setStatus(html, cls) {
+  const el = document.getElementById('status');
+  el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html;
+}
+
+function renderCandidates() {
+  const el = document.getElementById('candidates');
+  el.innerHTML = '';
+  if (candidates.length === 0) return;
+
+  const hasReference = candidates.some(c => c.reference || c.noData);
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = hasReference
+    ? '候補順位は変更されません。「参考」は安全候補とは別枠の情報です。'
+    : '候補順位は変更されません。表示するルートを切り替えられます。';
+  el.appendChild(hint);
+
+  candidates.forEach((cand, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = cand.label;
+    btn.className = i === selectedIndex ? 'selected' : '';
+    btn.addEventListener('click', () => {
+      selectedIndex = i;
+      lastRoute = { path: candidates[i].path, danger: candidates[i].danger, reference: candidates[i].reference, noData: candidates[i].noData };
+      render();
+      renderCandidates();
+      if (candidates[i].noData) {
+        setStatus(
+          'このルートは浸水データがないエリアを含むため、安全とは判定していません。自治体のハザードマップを確認してください。',
+          'warn'
+        );
+      } else if (candidates[i].reference) {
+        setStatus(
+          `参考経路：浅い内水（1m未満相当）を経由する最短ルートです。安全候補とは別枠の参考情報であり、` +
+          `安全候補の順位には含まれません。実際に通過するかどうかはこの情報をもとにご自身で判断してください。`,
+          'warn'
+        );
+      } else if (candidates[i].danger) {
+        const r = candidates[i].range;
+        setStatus(
+          `⚠ 危険エリアに完全に囲まれています。河川沿い（外水）は除外した上で、` +
+          `内水浸水想定区域を通過するルートを提示しています。` +
+          (r ? `このルートには ${r.min}〜${r.max}m の浸水想定区域が含まれます。` : '') +
+          `実際に通過するかどうかはこの情報をもとにご自身で判断してください。候補から表示ルートを切り替えられます。`,
+          'warn'
+        );
+      } else {
+        setStatus(`危険エリアを回避したルートが見つかりました。候補から表示ルートを切り替えられます。`, 'ok');
+      }
+    });
+    el.appendChild(btn);
+  });
+}
+
+function drawRoute(route) {
+  const pts = route.path.map(([r, c]) => `${c * CELL + CELL/2},${r * CELL + CELL/2}`).join(' ');
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', pts);
+  poly.setAttribute('fill', 'none');
+  const strokeColor = route.noData ? 'var(--route-nodata)' : route.reference ? 'var(--route-reference)' : (route.danger ? 'var(--route-danger)' : 'var(--route-safe)');
+  poly.setAttribute('stroke', strokeColor);
+  poly.setAttribute('stroke-width', '4');
+  poly.setAttribute('stroke-dasharray', (route.danger || route.reference || route.noData) ? '8 5' : 'none');
+  poly.setAttribute('stroke-linecap', 'round');
+  poly.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(poly);
+
+  // 危険区間・参考区間・データなし区間に丸印を追加
+  if (route.danger || route.reference || route.noData) {
+    const region = naiRegionStatus();
+    route.path.forEach(([r, c]) => {
+      const t = cells[r][c].type;
+      if (t === 'haz08' || t === 'haz15' || isNoDataRegionCell(t, c, region)) {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', c * CELL + CELL/2);
+        circle.setAttribute('cy', r * CELL + CELL/2);
+        circle.setAttribute('r', 4);
+        circle.setAttribute('fill', '#fff');
+        circle.setAttribute('stroke', route.noData ? 'var(--route-nodata)' : (route.reference ? 'var(--route-reference)' : 'var(--route-danger)'));
+        circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+      }
+    });
+  }
+}
+
+document.getElementById('calcBtn').addEventListener('click', () => {
+  let start = null;
+  const shelters = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (cells[r][c].type === 'start') start = [r, c];
+    if (cells[r][c].type === 'shelter') shelters.push([r, c]);
+  }
+  if (!start) { candidates = []; renderCandidates(); setStatus('起点が置かれていません。', 'warn'); return; }
+  if (shelters.length === 0) { candidates = []; renderCandidates(); setStatus('避難所が置かれていません。', 'warn'); return; }
+
+  const rawCells = cells;
+  const blockedSearchCells = buildBlockedSearchCells(rawCells); // 安全候補/参考経路(浅い内水)/フォールバック用(既存ロジックは無改修)
+  const noDataSearchCells = buildNoDataSearchCells(rawCells);   // データなし参考経路の探索専用
+
+  cells = blockedSearchCells;
+
+  // Step1: 通常探索
+  const safe = findSafeRoute(start, shelters);
+  if (safe.results.length > 0) {
+    const top = safe.results.slice(0, 3);
+    candidates = top.map((x, i) => ({
+      label: `第${i+1}候補：距離 ${x.d} マス`,
+      path: reconstructPath(safe.prev, x.s),
+      danger: false,
+    }));
+
+    // 参考経路(浅い内水)：安全候補（表示中の上位3件）とは別枠・別入力で計算。
+    // 到着避難所が安全候補と同一なら重複として非表示。
+    const safeShelterKeys = new Set(top.map(x => `${x.s[0]},${x.s[1]}`));
+    const ref = findReferenceRoute(start, shelters);
+    if (ref.results.length > 0) {
+      const best = ref.results[0];
+      const shelterKey = `${best.s[0]},${best.s[1]}`;
+      const refPath = reconstructPath(ref.prev, best.s);
+      const passesShallowWater = refPath.some(([r, c]) => cells[r][c].type === 'haz08');
+      if (passesShallowWater && !safeShelterKeys.has(shelterKey)) {
+        candidates.push({
+          label: `参考：浅い内水を経由（距離 ${best.d} マス／通常候補外）`,
+          path: refPath,
+          danger: false,
+          reference: true,
+        });
+      }
+    }
+
+    // 参考経路(浸水データが無いエリアを含む)：安全候補・浅い内水の参考経路とも別入力(noDataSearchCells)で計算。
+    // データが無い領域は安全とは判定しない。到着避難所が安全候補と同一なら重複として非表示。
+    cells = noDataSearchCells;
+    const noData = findNoDataRoute(start, shelters);
+    if (noData.results.length > 0) {
+      const best = noData.results[0];
+      const shelterKey = `${best.s[0]},${best.s[1]}`;
+      const bestPath = reconstructPath(noData.prev, best.s);
+      const passesNoData = bestPath.some(([r, c]) => noDataSearchCells[r][c].type === 'nodata');
+      if (passesNoData && !safeShelterKeys.has(shelterKey)) {
+        candidates.push({
+          label: `参考：浸水データが無いエリアを含む（距離 ${best.d} マス／通常候補外）`,
+          path: bestPath,
+          danger: false,
+          noData: true,
+        });
+      }
+    }
+
+    selectedIndex = 0;
+    lastRoute = { path: candidates[0].path, danger: false };
+    cells = rawCells; // render()側で改めて表示用セルに変換されるため、ここでは生データに戻す
+    render();
+    renderCandidates();
+    setStatus(`危険エリアを回避したルートが見つかりました。候補から表示ルートを切り替えられます。`, 'ok');
+    return;
+  }
+
+  // Step2: フォールバック（完全包囲時）
+  const fb = findFallbackRoute(start, shelters);
+  if (fb.results.length > 0) {
+    const top = fb.results.slice(0, 3);
+    candidates = top.map((x, i) => {
+      const path = reconstructPath(fb.prev, x.s);
+      const range = depthRangeOfPath(path);
+      const rangeLabel = range ? `浸水想定 ${range.min}〜${range.max}m` : '浸水想定区間なし';
+      return {
+        label: `第${i+1}候補：${rangeLabel}（距離 ${x.d[1]} マス）`,
+        path,
+        danger: true,
+        range,
+      };
+    });
+    selectedIndex = 0;
+    lastRoute = { path: candidates[0].path, danger: true };
+    cells = rawCells;
+    render();
+    renderCandidates();
+    const r0 = candidates[0].range;
+    setStatus(
+      `⚠ 危険エリアに完全に囲まれています。河川沿い（外水）は除外した上で、` +
+      `内水浸水想定区域を通過するルートを提示しています。` +
+      (r0 ? `このルートには ${r0.min}〜${r0.max}m の浸水想定区域が含まれます。` : '') +
+      `実際に通過するかどうかはこの情報をもとにご自身で判断してください。候補から表示ルートを切り替えられます。`,
+      'warn'
+    );
+    return;
+  }
+
+  cells = rawCells;
+  lastRoute = null;
+  candidates = [];
+  render();
+  renderCandidates();
+  setStatus('河川沿いを除外した状態でも避難所へ到達する経路が見つかりませんでした。', 'warn');
+});
+
+render();
+enterB(); // 初期画面（N/cells等の初期化が済んだ後に呼ぶ必要がある）
+</script>
+</body>
+</html>

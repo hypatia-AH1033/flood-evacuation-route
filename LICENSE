@@ -19,3 +19,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+【適用範囲に関する注意】
+本ファイル（LICENSE）は、本リポジトリに含まれるプログラムコードおよび各種ドキュメント構造（Software）に適用されるものです。
+本ツールが参照・検証対象とする各自治体等のハザードマップデータ自体のライセンス・二次利用条件については、本ライセンスの適用外です。データの権利関係および利用条件は `DATA_SOURCES.md` を参照してください。
